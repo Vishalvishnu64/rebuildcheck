@@ -21,6 +21,9 @@ LOCKFILE_NAMES = frozenset(
         "requirements.lock",
         "requirements-dev.lock",
         "requirements-prod.lock",
+        "requirements.txt",
+        "requirements-dev.txt",
+        "requirements-prod.txt",
         "poetry.lock",
         "pdm.lock",
         "pipfile.lock",
@@ -61,6 +64,26 @@ def _is_recognized(path: Path) -> bool:
     return lowered in LOCKFILE_NAMES
 
 
+def _is_usable(path: Path, data: bytes) -> bool:
+    """Accept a requirements file only when its entries are pinned."""
+
+    if path.name.casefold().endswith(".txt"):
+        entries = [
+            line.strip()
+            for line in data.decode("utf-8", errors="replace").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        if not entries:
+            return False
+        return all(
+            "==" in line
+            or " @ " in line
+            or line.startswith(("git+", "https://", "http://"))
+            for line in entries
+        )
+    return bool(data.strip())
+
+
 def run(repo: Path) -> CheckResult:
     """Return whether a readable, non-empty dependency lockfile exists."""
 
@@ -79,7 +102,7 @@ def run(repo: Path) -> CheckResult:
         relative = relative_path(repo, path)
         if data is None:
             unreadable.append(relative)
-        elif data.strip():
+        elif _is_usable(path, data):
             readable.append(relative)
 
     if readable:

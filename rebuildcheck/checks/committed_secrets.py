@@ -17,6 +17,7 @@ NO_FIX = "No action needed."
 PRIVATE_KEY_RE = re.compile(r"-----BEGIN [A-Z0-9 _-]*PRIVATE KEY-----")
 PROVIDER_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("aws-access-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("api-key", re.compile(r"\bsk-" + r"[A-Za-z0-9]{20,}\b")),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b")),
     ("slack-token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{16,}\b")),
     ("google-api-key", re.compile(r"\bAIza[0-9A-Za-z_-]{30,}\b")),

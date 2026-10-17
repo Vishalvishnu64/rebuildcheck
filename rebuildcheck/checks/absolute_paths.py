@@ -16,7 +16,20 @@ NO_FIX = "No action needed."
 
 # Build the roots in pieces so this checker does not report its own pattern
 # examples as a finding when it is itself committed and scanned.
-UNIX_USER_ROOTS = ("home", "Users", "root")
+UNIX_USER_ROOTS = (
+    "home",
+    "Users",
+    "root",
+    "tmp",
+    "var",
+    "opt",
+    "workspace",
+    "srv",
+    "etc",
+    "usr",
+    "bin",
+    "sbin",
+)
 UNIX_USER_PATH_RE = re.compile(
     r"(?<![\w/])/(?:" + "|".join(UNIX_USER_ROOTS) + r")[/\\][^\s\"'`<>]+",
     re.IGNORECASE,

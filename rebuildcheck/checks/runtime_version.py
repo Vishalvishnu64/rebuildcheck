@@ -33,6 +33,7 @@ RUNTIME_FILES = (
     "runtime.txt",
     "rust-toolchain",
     "rust-toolchain.toml",
+    "Dockerfile",
     ".tool-versions",
     "go.mod",
     "pyproject.toml",
@@ -98,6 +99,17 @@ def _parse_runtime_file(name: str, text: str) -> tuple[str, str] | None:
             pin = _pin_from_token(match.group(1))
             if pin is not None:
                 return pin, "channel"
+        return None
+
+    if lowered == "dockerfile":
+        match = re.search(
+            r"(?im)^\s*FROM\s+(?:python|node|ruby|golang|go|rust|java):([^\s@]+)",
+            text,
+        )
+        if match:
+            pin = _pin_from_token(match.group(1))
+            if pin is not None:
+                return pin, "FROM"
         return None
 
     if lowered == "pyproject.toml":
