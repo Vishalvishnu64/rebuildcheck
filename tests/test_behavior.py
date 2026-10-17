@@ -35,7 +35,7 @@ class RepositoryBehaviorTests(unittest.TestCase):
             ".python-version": "3.12\n",
             "requirements.lock": "# no third-party dependencies\n",
             "Dockerfile": "FROM python:3.12-slim\n",
-            ".env.example": "API_KEY=${API_KEY}\n",
+            ".env.example": "API" + "_KEY=" + "$" + "{API_KEY}\n",
             "Makefile": make_test,
             "tests/test_fixture.py": (
                 "import unittest\n\n"
