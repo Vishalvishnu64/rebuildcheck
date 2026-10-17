@@ -1,0 +1,9 @@
+[project]
+name = "rebuildcheck"
+version = "0.1.0"
+description = "Check whether a repository survives a clean rebuild."
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[tool.unittest]
+test-discovery = "tests"
