@@ -37,7 +37,8 @@ The command exits with status 0 only when every required check that ran passed.
 ## How it works
 
 1. The CLI detects a supported project type from root-level marker files and
-   includes it in the human and JSON reports.
+   includes it in the human and JSON reports. If the root has no recognised
+   project, it reports recognised projects in immediate subfolders.
 2. It runs ten defensive static checks against the requested repository,
    including Windows-to-Linux portability checks.
 3. It detects the documented test command and clones the committed repository
@@ -54,8 +55,11 @@ The command exits with status 0 only when every required check that ran passed.
 The `portability` check looks for CRLF line endings in shell scripts,
 Makefiles, and Dockerfiles; shebang scripts that are not executable in the Git
 index; and README paths whose capitalisation differs from the repository path.
-Each finding includes a concrete fix in the structured report. NUL-containing
-binary files are ignored rather than treated as text.
+Each finding includes its relative file path, line number, and a concrete fix in
+the human-readable and structured reports. Secret evidence is bounded to at
+most four leading characters followed by `****`; complete credential values
+are never printed. NUL-containing binary files are ignored rather than treated
+as text.
 
 ## Known limitations and next ideas
 
@@ -63,8 +67,9 @@ binary files are ignored rather than treated as text.
 clean-machine failure has been eliminated. It does not detect yet:
 
 - Secret detection is incomplete: the scanner targets common token formats and
-  literal assignments, so custom, short, encoded, or obfuscated credentials
-  can be missed.
+  literal assignments, skips recognised lockfiles and build/binary output, and
+  treats obvious dummy values as safe. Custom, short, encoded, or obfuscated
+  credentials can still be missed or require review.
 - Every machine-specific path: the path check looks for obvious user-specific
   Unix, Windows, and WSL patterns, but it does not understand every host-only
   setting or generated binary.
@@ -72,6 +77,12 @@ clean-machine failure has been eliminated. It does not detect yet:
   and only recognises common script names, shebangs, and README path forms. It
   does not model all filesystem semantics, generated files, or tools that
   rewrite line endings outside Git.
+- Every project in a monorepo: only immediate subfolders are inspected when
+  the root has no recognised project files; nested workspaces and mixed or
+  ambiguous subfolders are not recursively classified.
+- Every environment-variable reference: the missing `.env.example` priority
+  uses a bounded set of common source-code patterns, so unusual configuration
+  loaders may not be recognised.
 - Dependency graph problems: a recognised lockfile can still be stale,
   incomplete, missing hashes, or inconsistent with the dependency manifest.
   The checker does not resolve or install dependencies for the target project.
@@ -88,8 +99,8 @@ clean-machine failure has been eliminated. It does not detect yet:
   documented deployment process actually succeeds.
 
 Useful next ideas are deeper manifest/lockfile consistency checks, broader
-secret and host-path detectors, and optional service-aware or multi-platform
-verification.
+secret and host-path detectors, recursive workspace discovery, and optional
+service-aware or multi-platform verification.
 
 ## Test
 
@@ -116,11 +127,15 @@ checks recognise these reproducibility markers and test commands:
 | Node | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | `.nvmrc` | `npm test` |
 | Go | `go.sum` | `go.mod` `go` directive | `go test` |
 | Rust | `Cargo.lock` | `rust-toolchain.toml` | `cargo test` |
+| Dart | `pubspec.lock` | Not inferred from `pubspec.yaml` | `dart test` |
+| Flutter | `pubspec.lock` | Not inferred from `pubspec.yaml` | `flutter test` |
 
 The project type is reported as `unknown` when no supported marker is present
 or when markers from multiple ecosystems make a single classification
-ambiguous. Lockfiles are checked for presence and usable content; the tool
-does not resolve dependencies or install another ecosystem's toolchain.
+ambiguous. A Flutter type requires a clear `flutter` or `flutter_test`
+dependency in `pubspec.yaml`; otherwise a Dart pubspec is reported as Dart.
+Lockfiles are checked for presence and usable content; the tool does not
+resolve dependencies or install another ecosystem's toolchain.
 
 ## Deploy
 

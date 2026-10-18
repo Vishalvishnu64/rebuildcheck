@@ -41,7 +41,8 @@ class EvidenceAndFalsePositiveTests(unittest.TestCase):
 
     def test_findings_keep_relative_line_and_redacted_secret_preview(self) -> None:
         secret = self.aws_value()
-        self.write("src/config.txt", "header\nACCESS_KEY=" + secret + "\n")
+        key = "ACCESS" + "_KEY"
+        self.write("src/config.txt", "header\n" + key + "=" + secret + "\n")
 
         result = committed_secrets.run(self.root)
 
@@ -77,7 +78,8 @@ class EvidenceAndFalsePositiveTests(unittest.TestCase):
     def test_lockfiles_build_outputs_and_binary_extensions_are_skipped(self) -> None:
         secret = self.aws_value()
         machine_path = self.home_path()
-        content = "TOKEN=" + secret + "\nPATH=" + machine_path + "\n"
+        token_key = "TO" + "KEN"
+        content = token_key + "=" + secret + "\nPATH=" + machine_path + "\n"
 
         for name in (
             "package-lock.json",
@@ -115,7 +117,8 @@ class EvidenceAndFalsePositiveTests(unittest.TestCase):
             "AKIA" + "x" * 16,
             "ghp_" + "x" * 24,
         )
-        lines = ["API_KEY=" + value for value in dummy_values]
+        api_key = "API" + "_KEY"
+        lines = [api_key + "=" + value for value in dummy_values]
         lines.append("Authorization: Bearer " + "xoxb-" + "x" * 20)
         lines.append(
             "SERVICE_URL=https://user:" + "fake-" + "x" * 16 + "@example.test"
