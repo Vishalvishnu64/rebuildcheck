@@ -63,9 +63,12 @@ class MultiLanguageFixtureTests(unittest.TestCase):
     def test_go_markers_and_project_file_test_fallback(self) -> None:
         self.write("go.sum", "module.example.test v1.2.3 h1:checksum\n")
         self.write("go.mod", "module module.example.test\n\ngo 1.22\n")
+        self.write("README.md", "## Test\nRun `go test ./...`.\n")
 
         self.assertTrue(dependency_lockfile.run(self.root).passed)
         self.assertTrue(runtime_version.run(self.root).passed)
+        self.assertTrue(test_command.run(self.root).passed)
+        (self.root / "README.md").unlink()
         self.assertEqual(test_command.detect_test_command(self.root), "go test ./...")
         self.assertEqual(detect_project_type(self.root), "go")
 
@@ -98,6 +101,41 @@ class MultiLanguageFixtureTests(unittest.TestCase):
         self.assertEqual(report.project_type, "node")
         self.assertEqual(document["project_type"], "node")
         self.assertIn("Project type: Node", render_human(report))
+
+    def test_unpinned_or_missing_ecosystem_markers_fail_in_disposable_fixtures(self) -> None:
+        fixtures = (
+            {
+                "name": "node",
+                "files": {".nvmrc": "20\n", "README.md": "## Test\nRun the tests.\n"},
+            },
+            {
+                "name": "go",
+                "files": {
+                    "go.mod": "module module.example.test\n\ngo 1\n",
+                    "README.md": "## Test\nRun the checks.\n",
+                },
+            },
+            {
+                "name": "rust",
+                "files": {
+                    "rust-toolchain.toml": '[toolchain]\nchannel = "stable"\n',
+                    "README.md": "## Test\nRun the checks.\n",
+                },
+            },
+        )
+
+        for fixture in fixtures:
+            with self.subTest(project_type=fixture["name"]):
+                for relative, content in fixture["files"].items():
+                    self.write(relative, content)
+
+                self.assertFalse(dependency_lockfile.run(self.root).passed)
+                self.assertFalse(runtime_version.run(self.root).passed)
+                self.assertFalse(test_command.run(self.root).passed)
+                self.assertEqual(detect_project_type(self.root), fixture["name"])
+
+                for relative in fixture["files"]:
+                    (self.root / relative).unlink()
 
 
 if __name__ == "__main__":
