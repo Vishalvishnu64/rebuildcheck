@@ -32,8 +32,6 @@ SKIP_DIRECTORIES = frozenset(
         ".mypy_cache",
     }
 )
-FIXTURE_MARKER = ".rebuildcheck-fixture"
-
 README_NAMES = ("README.md", "README.rst", "README.txt", "README")
 
 
@@ -96,17 +94,11 @@ def iter_files(repo: os.PathLike[str] | str) -> Iterator[Path]:
             onerror=ignore_walk_error,
         )
         for directory, directories, filenames in walker:
-            kept_directories: list[str] = []
-            for name in directories:
-                if name.casefold() in SKIP_DIRECTORIES:
-                    continue
-                try:
-                    if (Path(directory) / name / FIXTURE_MARKER).is_file():
-                        continue
-                except (OSError, RuntimeError):
-                    pass
-                kept_directories.append(name)
-            directories[:] = kept_directories
+            directories[:] = [
+                name
+                for name in directories
+                if name.casefold() not in SKIP_DIRECTORIES
+            ]
             for filename in filenames:
                 path = Path(directory) / filename
                 try:
@@ -315,34 +307,10 @@ def tracked_files(repo: os.PathLike[str] | str) -> tuple[bool, list[Path]]:
             candidate = root / relative
             if candidate.is_symlink() or not candidate.is_file():
                 continue
-            if _inside_marked_fixture(root, candidate):
-                continue
             files.append(candidate)
         except (OSError, RuntimeError, TypeError, ValueError):
             continue
     return True, files
-
-
-def _inside_marked_fixture(repo: Path, path: Path) -> bool:
-    """Return whether ``path`` is below a marked fixture directory.
-
-    A repository may keep intentionally broken sample trees for documentation.
-    The marker excludes those trees when the parent project scans itself, while
-    scanning the sample directory as the repository root still includes it.
-    """
-
-    try:
-        relative = Path(os.path.relpath(path, repo))
-        if relative.is_absolute() or ".." in relative.parts:
-            return False
-        current = repo
-        for part in relative.parts[:-1]:
-            current /= part
-            if (current / FIXTURE_MARKER).is_file():
-                return True
-    except (OSError, RuntimeError, TypeError, ValueError):
-        return False
-    return False
 
 
 def files_for_scan(repo: os.PathLike[str] | str) -> tuple[bool, list[Path]]:

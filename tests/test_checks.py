@@ -316,26 +316,8 @@ class CheckFixtureTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertIn(path.name, result.details["unreadable"])
 
-    def test_marked_fixture_is_not_scanned_when_parent_project_scans_itself(self) -> None:
-        self.write("README.md", "parent project\n")
-        self.commit()
-        fixture = self.root / "examples" / "broken"
-        fixture.mkdir(parents=True)
-        (fixture / ".rebuildcheck-fixture").write_text("fixture\n", encoding="utf-8")
-        (fixture / "bad.txt").write_text(
-            "/" + "home/user/repo\n" + "TOKEN=" + "AKIA" + "C" * 16 + "\n",
-            encoding="utf-8",
-        )
-        self.git("add", ".")
-        self.git("commit", "-qm", "fixture: add marked sample")
-
-        self.assertTrue(absolute_paths.run(self.root).passed)
-        self.assertTrue(committed_secrets.run(self.root).passed)
-
-        self.assertFalse(absolute_paths.run(fixture).passed)
-        self.assertFalse(committed_secrets.run(fixture).passed)
-
     def test_current_project_examples_and_documentation_do_not_trigger_detectors(self) -> None:
+        self.assertFalse((ROOT / "examples" / "broken" / "bad-config.txt").exists())
         self.assertTrue(absolute_paths.run(ROOT).passed)
         self.assertTrue(committed_secrets.run(ROOT).passed)
 
@@ -400,18 +382,28 @@ class CheckFixtureTests(unittest.TestCase):
         self.assertEqual(report.fixes, sorted(report.fixes, key=lambda item: (item["priority"], item["check"])))
 
     def test_broken_example_cli_is_nonzero_and_json_is_valid(self) -> None:
-        output = io.StringIO()
+        import sys
 
-        with redirect_stdout(output):
-            exit_code = main(
-                [str(ROOT / "examples" / "broken"), "--json"]
-            )
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "examples/materialize.py",
+                "broken",
+                "--no-run",
+                "--json",
+            ],
+            cwd=ROOT,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
 
-        document = json.loads(output.getvalue())
+        document = json.loads(completed.stdout)
         names = {item["check"] for item in document["fixes"]}
-        self.assertNotEqual(exit_code, 0)
+        self.assertNotEqual(completed.returncode, 0, completed.stderr)
         self.assertFalse(document["passed"])
-        self.assertEqual(document["score"], 50)
+        self.assertEqual(document["score"], 66)
         self.assertTrue({"dependency_lockfile", "absolute_paths", "committed_secrets"} <= names)
         self.assertEqual(
             document["fixes"],

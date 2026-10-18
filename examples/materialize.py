@@ -33,8 +33,9 @@ def main(argv: list[str] | None = None) -> int:
         shutil.copytree(
             source,
             destination,
-            ignore=shutil.ignore_patterns(".rebuildcheck-fixture"),
         )
+        if args.fixture == "broken":
+            _write_broken_findings(destination)
         _run_git(destination, "init", "-q")
         _run_git(destination, "config", "user.name", "rebuildcheck example")
         _run_git(destination, "config", "user.email", "example@example.invalid")
@@ -48,6 +49,19 @@ def main(argv: list[str] | None = None) -> int:
             command.append("--json")
         completed = subprocess.run(command, cwd=project_root, check=False)
         return completed.returncode
+
+
+def _write_broken_findings(destination: Path) -> None:
+    """Add deliberate failures only to the temporary broken repository."""
+
+    path_key = "PROJECT" + "_PATH"
+    token_key = "API" + "_TOKEN"
+    unix_path = "/" + "home/" + "user/project"
+    fake_token = "ghp_" + "a" * 24
+    (destination / "bad-config.txt").write_text(
+        f"{path_key}={unix_path}\n{token_key}={fake_token}\n",
+        encoding="utf-8",
+    )
 
 
 def _run_git(cwd: Path, *arguments: str) -> None:
