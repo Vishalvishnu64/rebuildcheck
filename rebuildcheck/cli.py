@@ -10,6 +10,7 @@ from typing import Any, Sequence
 
 from rebuildcheck.checks import CHECKS
 from rebuildcheck.models import CheckResult
+from rebuildcheck.project_type import UNKNOWN_PROJECT_TYPE, detect_project_type
 from rebuildcheck.verification import (
     CleanRoomTestResult,
     DockerResult,
@@ -27,6 +28,7 @@ class InspectionReport:
     verification: VerificationReport
     score: int
     fixes: list[dict[str, Any]]
+    project_type: str = UNKNOWN_PROJECT_TYPE
 
     @property
     def passed(self) -> bool:
@@ -45,6 +47,7 @@ class InspectionReport:
 
         return {
             "repository": self.repository,
+            "project_type": self.project_type,
             "passed": self.passed,
             "score": self.score,
             "checks": [check.to_dict() for check in self.checks],
@@ -129,6 +132,7 @@ def inspect_repository(
         verification=verification,
         score=score,
         fixes=fixes,
+        project_type=detect_project_type(repo),
     )
 
 
@@ -143,6 +147,7 @@ def render_human(report: InspectionReport) -> str:
 
     lines = [
         f"rebuildcheck report: {report.repository}",
+        f"Project type: {report.project_type.title()}",
         f"Score: {report.score}/100",
         "",
         "Static checks:",

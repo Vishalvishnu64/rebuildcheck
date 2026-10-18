@@ -96,6 +96,10 @@ def _detect_from_project_files(repo: Path) -> str | None:
     if cargo is not None and read_text(cargo) is not None:
         return "cargo test"
 
+    go_mod = root_file(repo, "go.mod")
+    if go_mod is not None and read_text(go_mod) is not None:
+        return "go test ./..."
+
     return None
 
 
