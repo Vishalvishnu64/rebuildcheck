@@ -1,0 +1,2 @@
+PROJECT_PATH=/home/user/project
+API_TOKEN=ghp_aaaaaaaaaaaaaaaaaaaaaaaa
