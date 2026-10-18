@@ -8,6 +8,7 @@ from pathlib import Path
 from rebuildcheck.models import CheckResult
 
 from .common import (
+    iter_files,
     iter_environment_files,
     read_text,
     relative_path,
@@ -17,6 +18,7 @@ from .common import (
 
 NAME = "environment_example"
 PRIORITY = 1
+NO_REFERENCE_PRIORITY = 3
 NO_FIX = "No action needed."
 
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -71,6 +73,74 @@ SAFE_LITERAL_VALUES = frozenset(
         "127.0.0.1",
         "::1",
     }
+)
+
+# Only authored source-like files are inspected for environment access.  The
+# scanner intentionally avoids README/configuration prose and dependency
+# directories handled by ``iter_files``.  It reports file names and line
+# numbers, never source snippets or machine-specific paths.
+CODE_SUFFIXES = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cs",
+        ".cxx",
+        ".dart",
+        ".ex",
+        ".exs",
+        ".fs",
+        ".fsx",
+        ".go",
+        ".h",
+        ".hpp",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".kts",
+        ".m",
+        ".mm",
+        ".php",
+        ".pl",
+        ".pm",
+        ".py",
+        ".rb",
+        ".rs",
+        ".sh",
+        ".swift",
+        ".ts",
+        ".tsx",
+        ".zsh",
+    }
+)
+CODE_FILENAMES = frozenset(
+    {
+        "dockerfile",
+        "jenkinsfile",
+        "makefile",
+        "procfile",
+        "rakefile",
+        "vagrantfile",
+    }
+)
+ENVIRONMENT_REFERENCE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bos\.environ(?:\s*[\[.]|\b)", re.IGNORECASE),
+    re.compile(r"\bos\.getenv\s*\(", re.IGNORECASE),
+    re.compile(r"\benviron(?:\s*[\[.]|\b)", re.IGNORECASE),
+    re.compile(r"\b(?:getenv|lookupenv)\s*\(", re.IGNORECASE),
+    re.compile(r"\bprocess\.env(?:\s*[\[.]|\b)", re.IGNORECASE),
+    re.compile(r"\bimport\.meta\.env\b", re.IGNORECASE),
+    re.compile(r"\bdeno\.env(?:\s*[\[.]|\b)", re.IGNORECASE),
+    re.compile(r"\bplatform\.environment\b", re.IGNORECASE),
+    re.compile(r"\b(?:string|bool|int)\.fromenvironment\s*\(", re.IGNORECASE),
+    re.compile(r"\b(?:std::)?env::(?:var|var_os|vars|vars_os)\s*\(", re.IGNORECASE),
+    re.compile(r"\b(?:system\.)?getenv\s*\(", re.IGNORECASE),
+    re.compile(r"\benvironment\.getenvironmentvariable\s*\(", re.IGNORECASE),
+    re.compile(r"\bENV(?:\s*\[|\s*\.\s*(?:fetch|key|values?)\s*\()", re.IGNORECASE),
+    re.compile(r"\$_ENV\b", re.IGNORECASE),
+    re.compile(r"\$env:[A-Za-z_][A-Za-z0-9_]*", re.IGNORECASE),
+    re.compile(r"(?<![$A-Za-z0-9_])\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)"),
 )
 
 
@@ -158,18 +228,90 @@ def _parse_environment_file(text: str) -> list[dict[str, object]]:
     return unsafe
 
 
+def _is_code_file(path: Path) -> bool:
+    """Return whether ``path`` looks like an authored source file."""
+
+    try:
+        lowered_name = path.name.casefold()
+        if lowered_name in CODE_FILENAMES:
+            return True
+        return path.suffix.casefold() in CODE_SUFFIXES
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return False
+
+
+def _line_has_environment_reference(line: str) -> bool:
+    """Return whether a source line contains a common env access pattern."""
+
+    stripped = line.strip()
+    if not stripped or stripped.startswith(("#", "//", "--")):
+        return False
+    return any(
+        pattern.search(line) is not None
+        for pattern in ENVIRONMENT_REFERENCE_PATTERNS
+    )
+
+
+def _environment_references(repo: Path) -> list[dict[str, object]]:
+    """Find bounded, relative evidence that source code reads env values."""
+
+    references: list[dict[str, object]] = []
+    try:
+        paths = iter_files(repo)
+        for path in paths:
+            if not _is_code_file(path):
+                continue
+            text = read_text(path)
+            if text is None:
+                continue
+            try:
+                line_number = next(
+                    (
+                        number
+                        for number, line in enumerate(text.splitlines(), start=1)
+                        if _line_has_environment_reference(line)
+                    ),
+                    None,
+                )
+            except (OSError, RuntimeError, TypeError, ValueError):
+                continue
+            if line_number is None:
+                continue
+            references.append(
+                {
+                    "path": relative_path(repo, path),
+                    "line": line_number,
+                }
+            )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return references
+    return references
+
+
 def run(repo: Path) -> CheckResult:
     """Return whether a root .env.example exists and dotenv files are safe."""
 
     example = root_file(repo, ".env.example")
     if example is None:
+        references = _environment_references(repo)
+        priority = PRIORITY if references else NO_REFERENCE_PRIORITY
+        if references:
+            reason = (
+                "The repository root does not contain .env.example despite source "
+                "code referencing environment variables."
+            )
+        else:
+            reason = (
+                "The repository root does not contain .env.example, and no "
+                "environment-variable references were found in source files."
+            )
         return CheckResult(
             passed=False,
             name=NAME,
-            reason="The repository root does not contain .env.example.",
+            reason=reason,
             fix="Add a root .env.example containing only blank or clearly marked placeholder values, and keep real credentials out of the repository.",
-            priority=PRIORITY,
-            details={"path": ".env.example"},
+            priority=priority,
+            details={"path": ".env.example", "references": references[:100]},
         )
 
     files = sorted(

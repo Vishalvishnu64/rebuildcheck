@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
 from rebuildcheck.checks import CHECKS
 from rebuildcheck.models import CheckResult
-from rebuildcheck.project_type import UNKNOWN_PROJECT_TYPE, detect_project_type
+from rebuildcheck.project_type import (
+    UNKNOWN_PROJECT_TYPE,
+    detect_project_type,
+    detect_project_types,
+)
 from rebuildcheck.verification import (
     CleanRoomTestResult,
     DockerResult,
@@ -29,6 +33,7 @@ class InspectionReport:
     score: int
     fixes: list[dict[str, Any]]
     project_type: str = UNKNOWN_PROJECT_TYPE
+    projects: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -48,6 +53,7 @@ class InspectionReport:
         return {
             "repository": self.repository,
             "project_type": self.project_type,
+            "projects": self.projects,
             "passed": self.passed,
             "score": self.score,
             "checks": [check.to_dict() for check in self.checks],
@@ -133,6 +139,7 @@ def inspect_repository(
         score=score,
         fixes=fixes,
         project_type=detect_project_type(repo),
+        projects=detect_project_types(repo),
     )
 
 
@@ -148,14 +155,25 @@ def render_human(report: InspectionReport) -> str:
     lines = [
         f"rebuildcheck report: {report.repository}",
         f"Project type: {report.project_type.title()}",
-        f"Score: {report.score}/100",
-        "",
-        "Static checks:",
     ]
+    if report.projects:
+        lines.append("Projects:")
+        lines.extend(
+            f"  {project['path']}: {project['type'].title()}"
+            for project in report.projects
+        )
+    lines.extend(
+        [
+            f"Score: {report.score}/100",
+            "",
+            "Static checks:",
+        ]
+    )
     for check in report.checks:
         status = "PASS" if check.passed else "FAIL"
         label = check.name.replace("_", " ").title()
         lines.append(f"  {status} {label} — {check.reason}")
+        lines.extend(_render_finding_evidence(check))
 
     test = report.verification.test
     lines.extend(
@@ -183,6 +201,44 @@ def render_human(report: InspectionReport) -> str:
     else:
         lines.append("  None — the repository is ready for a clean rebuild.")
     return "\n".join(lines)
+
+
+_EVIDENCE_CHECKS = frozenset(
+    {"committed_secrets", "absolute_paths", "portability"}
+)
+
+
+def _render_finding_evidence(check: CheckResult) -> list[str]:
+    """Render bounded path/line evidence without exposing secret values."""
+
+    if check.name not in _EVIDENCE_CHECKS:
+        return []
+    raw_findings = check.details.get("findings")
+    if not isinstance(raw_findings, list):
+        return []
+
+    lines: list[str] = []
+    for finding in raw_findings:
+        if not isinstance(finding, dict):
+            continue
+        path = finding.get("path")
+        line = finding.get("line")
+        kind = finding.get("kind")
+        if not isinstance(path, str) or not isinstance(line, int):
+            continue
+        detail = f"    Evidence: {path}:{line}"
+        if isinstance(kind, str) and kind:
+            detail += f" ({kind})"
+        preview = finding.get("preview")
+        if isinstance(preview, str) and preview:
+            # Secret scanners provide only a bounded preview. Do not render any
+            # arbitrary value from a check result into the human report.
+            detail += f" [{preview[:4]}****]"
+        lines.append(detail)
+        fix = finding.get("fix")
+        if isinstance(fix, str) and fix:
+            lines.append(f"      Fix: {fix}")
+    return lines
 
 
 def main(argv: Sequence[str] | None = None) -> int:

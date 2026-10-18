@@ -129,7 +129,7 @@ def run(repo: Path) -> CheckResult:
         passed=False,
         name=NAME,
         reason="No recognized dependency lockfile was found.",
-        fix="Generate and commit a lockfile such as requirements.lock, uv.lock, package-lock.json, Cargo.lock, or go.sum.",
+        fix="Generate and commit a lockfile such as requirements.lock, uv.lock, package-lock.json, pubspec.lock, Cargo.lock, or go.sum.",
         priority=PRIORITY,
         details={"lockfiles": []},
     )

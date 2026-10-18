@@ -7,7 +7,13 @@ from pathlib import Path
 
 from rebuildcheck.models import CheckResult
 
-from .common import as_repo_path, files_for_scan, read_bytes, relative_path
+from .common import (
+    as_repo_path,
+    files_for_scan,
+    read_bytes,
+    relative_path,
+    should_skip_content_scan,
+)
 
 
 NAME = "absolute_paths"
@@ -33,14 +39,28 @@ WSL_USER_PATH_RE = re.compile(
     r"(?<![\w/])/mnt/[A-Za-z][/\\]+Users[/\\]+[^\s\"'`<>]+",
     re.IGNORECASE,
 )
+HTTP_URL_RE = re.compile(r"(?i)\bhttps?://[^\s\"'`<>]+")
+
+
+def _match_is_inside_http_url(line: str, start: int) -> bool:
+    return any(match.start() <= start < match.end() for match in HTTP_URL_RE.finditer(line))
+
+
+def _has_match_outside_http_url(
+    pattern: re.Pattern[str], line: str
+) -> bool:
+    return any(
+        not _match_is_inside_http_url(line, match.start())
+        for match in pattern.finditer(line)
+    )
 
 
 def _finding_kind(line: str) -> str | None:
-    if WINDOWS_USER_PATH_RE.search(line):
+    if _has_match_outside_http_url(WINDOWS_USER_PATH_RE, line):
         return "windows-user-path"
-    if WSL_USER_PATH_RE.search(line):
+    if _has_match_outside_http_url(WSL_USER_PATH_RE, line):
         return "wsl-user-path"
-    if UNIX_USER_PATH_RE.search(line):
+    if _has_match_outside_http_url(UNIX_USER_PATH_RE, line):
         return "unix-user-path"
     return None
 
@@ -62,6 +82,8 @@ def run(repo: Path) -> CheckResult:
     findings: list[dict[str, object]] = []
     unreadable: list[str] = []
     for path in sorted(files, key=lambda item: relative_path(repo, item)):
+        if should_skip_content_scan(repo, path):
+            continue
         data = read_bytes(path)
         relative = relative_path(repo, path)
         if data is None:

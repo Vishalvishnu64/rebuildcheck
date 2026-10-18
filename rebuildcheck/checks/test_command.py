@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from rebuildcheck.models import CheckResult
+from rebuildcheck.project_type import detect_project_type
 
 from .common import find_readme, read_text, relative_path, root_file
 
@@ -27,6 +28,8 @@ COMMAND_PATTERNS: tuple[tuple[re.Pattern[str], str | None], ...] = (
     (re.compile(r"(?<![\w-])(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test\b", re.IGNORECASE), None),
     (re.compile(r"(?<![\w-])cargo\s+test\b[^`\n;&|]*", re.IGNORECASE), None),
     (re.compile(r"(?<![\w-])go\s+test\b[^`\n;&|]*", re.IGNORECASE), None),
+    (re.compile(r"(?<![\w-])flutter\s+test\b[^`\n;&|]*", re.IGNORECASE), None),
+    (re.compile(r"(?<![\w-])dart\s+test\b[^`\n;&|]*", re.IGNORECASE), None),
     (re.compile(r"(?<![\w-])(?:dotnet\s+test|mvn\s+test|gradle\s+test|mix\s+test)\b[^`\n;&|]*", re.IGNORECASE), None),
     (re.compile(r"(?<![\w-])(?:\.\/)?gradlew\s+test\b[^`\n;&|]*", re.IGNORECASE), None),
     (re.compile(r"(?<![\w-])bundle\s+exec\s+(?:rspec|rake\s+test)\b[^`\n;&|]*", re.IGNORECASE), None),
@@ -99,6 +102,13 @@ def _detect_from_project_files(repo: Path) -> str | None:
     go_mod = root_file(repo, "go.mod")
     if go_mod is not None and read_text(go_mod) is not None:
         return "go test ./..."
+
+    if root_file(repo, "pubspec.yaml") is not None or root_file(repo, "pubspec.lock") is not None:
+        project_type = detect_project_type(repo)
+        if project_type == "flutter":
+            return "flutter test"
+        if project_type == "dart":
+            return "dart test"
 
     return None
 

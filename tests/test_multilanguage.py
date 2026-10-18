@@ -3,10 +3,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rebuildcheck.checks import dependency_lockfile, runtime_version, test_command
+from rebuildcheck.checks import (
+    dependency_lockfile,
+    environment_example,
+    runtime_version,
+    test_command,
+)
 from rebuildcheck.cli import inspect_repository, render_human, render_json
 from rebuildcheck.project_type import (
     detect_project_type,
+    detect_project_types,
     project_type_candidates,
 )
 
@@ -81,6 +87,87 @@ class MultiLanguageFixtureTests(unittest.TestCase):
         self.assertTrue(runtime_version.run(self.root).passed)
         self.assertTrue(test_command.run(self.root).passed)
         self.assertEqual(detect_project_type(self.root), "rust")
+
+    def test_dart_and_flutter_markers_and_test_fallbacks(self) -> None:
+        self.write(
+            "pubspec.yaml",
+            "name: sample_dart\n"
+            "dependencies:\n"
+            "  collection: ^1.18.0\n",
+        )
+        self.write("pubspec.lock", "packages:\n  collection:\n    dependency: direct main\n")
+
+        self.assertEqual(project_type_candidates(self.root), ("dart",))
+        self.assertEqual(detect_project_type(self.root), "dart")
+        self.assertTrue(dependency_lockfile.run(self.root).passed)
+        self.assertEqual(test_command.detect_test_command(self.root), "dart test")
+
+        self.write(
+            "pubspec.yaml",
+            "name: sample_flutter\n"
+            "dependencies:\n"
+            "  flutter:\n"
+            "    sdk: flutter\n"
+            "dev_dependencies:\n"
+            "  flutter_test:\n"
+            "    sdk: flutter\n",
+        )
+        self.assertEqual(project_type_candidates(self.root), ("flutter",))
+        self.assertEqual(detect_project_type(self.root), "flutter")
+        self.assertEqual(test_command.detect_test_command(self.root), "flutter test")
+
+        self.write("README.md", "## Test\nRun `flutter test --coverage`.\n")
+        result = test_command.run(self.root)
+        self.assertTrue(result.passed)
+        self.assertEqual(result.details["command"], "flutter test --coverage")
+
+    def test_unrecognised_root_reports_immediate_projects_in_cli_data(self) -> None:
+        self.write("python-app/pyproject.toml", "[project]\nname = 'sample'\n")
+        self.write("flutter-app/pubspec.yaml", "name: sample\ndependencies:\n  flutter:\n    sdk: flutter\n")
+        self.write("ambiguous/package.json", "{}\n")
+        self.write("ambiguous/go.mod", "module example.test\ngo 1.22\n")
+        self.write("nested/hidden/package.json", "{}\n")
+
+        self.assertEqual(detect_project_type(self.root), "unknown")
+        self.assertEqual(
+            detect_project_types(self.root),
+            [
+                {"path": "flutter-app", "type": "flutter"},
+                {"path": "python-app", "type": "python"},
+            ],
+        )
+
+        report = inspect_repository(self.root, no_run=True)
+        document = json.loads(render_json(report))
+        self.assertEqual(document["project_type"], "unknown")
+        self.assertEqual(document["projects"], detect_project_types(self.root))
+        human = render_human(report)
+        self.assertIn("python-app: Python", human)
+        self.assertIn("flutter-app: Flutter", human)
+
+    def test_missing_environment_example_priority_depends_on_source_references(self) -> None:
+        without_reference = environment_example.run(self.root)
+        self.assertFalse(without_reference.passed)
+        self.assertEqual(without_reference.priority, 3)
+        self.assertEqual(without_reference.details["references"], [])
+
+        self.write("app.py", "import os\nservice_url = os.getenv('SERVICE_URL')\n")
+        with_reference = environment_example.run(self.root)
+        self.assertFalse(with_reference.passed)
+        self.assertEqual(with_reference.priority, 1)
+        self.assertEqual(with_reference.details["references"][0]["path"], "app.py")
+
+    def test_missing_lockfile_fix_precedes_no_environment_example_fix(self) -> None:
+        self.write("pyproject.toml", "[project]\nname = 'sample'\n")
+        report = inspect_repository(self.root, no_run=True)
+        priorities = {
+            item["check"]: item["priority"]
+            for item in report.fixes
+        }
+        self.assertLess(
+            priorities["dependency_lockfile"],
+            priorities["environment_example"],
+        )
 
     def test_detector_is_deterministic_and_neutral_for_unknown_or_ambiguous(self) -> None:
         self.assertEqual(detect_project_type(self.root), "unknown")

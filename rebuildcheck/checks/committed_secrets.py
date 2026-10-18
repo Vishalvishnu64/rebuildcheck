@@ -7,7 +7,13 @@ from pathlib import Path
 
 from rebuildcheck.models import CheckResult
 
-from .common import as_repo_path, files_for_scan, read_bytes, relative_path
+from .common import (
+    as_repo_path,
+    files_for_scan,
+    read_bytes,
+    relative_path,
+    should_skip_content_scan,
+)
 
 
 NAME = "committed_secrets"
@@ -37,6 +43,7 @@ PLACEHOLDER_WORDS = frozenset(
         "",
         "example",
         "dummy",
+        "fake",
         "placeholder",
         "changeme",
         "change-me",
@@ -53,8 +60,15 @@ PLACEHOLDER_WORDS = frozenset(
         "none",
         "false",
         "true",
+        "test",
+        "xxxx",
     }
 )
+PLACEHOLDER_PREFIX_RE = re.compile(
+    r"^(?:example|dummy|fake|changeme|change[-_]?me|test)(?:$|[0-9]|[-_.:/])",
+    re.IGNORECASE,
+)
+REPEATED_X_PREFIX_RE = re.compile(r"^x{4,}(?:$|[0-9]|[-_.:/])", re.IGNORECASE)
 
 
 def _looks_placeholder(value: str) -> bool:
@@ -68,12 +82,53 @@ def _looks_placeholder(value: str) -> bool:
         or (stripped.startswith("<") and stripped.endswith(">"))
         or "example" in lowered
         or lowered.startswith(("your-", "your_", "change-", "replace-"))
+        or PLACEHOLDER_PREFIX_RE.match(lowered) is not None
+        or REPEATED_X_PREFIX_RE.match(lowered) is not None
     )
+
+
+def _provider_value_is_placeholder(value: str) -> bool:
+    """Recognize dummy payloads without weakening high-signal token checks."""
+
+    if _looks_placeholder(value):
+        return True
+    lowered = value.casefold()
+    for prefix in (
+        "akia",
+        "sk-",
+        "ghp_",
+        "gho_",
+        "ghu_",
+        "ghs_",
+        "ghr_",
+        "xoxb-",
+        "xoxa-",
+        "xoxp-",
+        "xoxr-",
+        "xoxs-",
+        "AIza",
+        "sk_live_",
+        "sk_test_",
+        "rk_live_",
+        "rk_test_",
+        "eyj",
+    ):
+        if lowered.startswith(prefix.casefold()) and _looks_placeholder(
+            lowered[len(prefix) :]
+        ):
+            return True
+    return False
+
+
+def _redacted_preview(value: str) -> str:
+    """Return a bounded preview that cannot expose the full matched value."""
+
+    return f"{value[:4]}****" if value else "****"
 
 
 def _assignment_is_secret(match: re.Match[str], key: str) -> bool:
     value = match.group("quoted") or match.group("bare") or ""
-    if _looks_placeholder(value):
+    if _provider_value_is_placeholder(value):
         return False
     # Code often assigns a variable or calls a loader, which is not a literal
     # secret.  Quoted values and sufficiently substantial bare values are the
@@ -91,31 +146,41 @@ def _assignment_is_secret(match: re.Match[str], key: str) -> bool:
 
 
 def _scan_text(text: str, relative: str) -> list[dict[str, object]]:
-    findings: list[dict[str, object]] = []
-    seen: set[tuple[int, str]] = set()
+    findings: dict[tuple[int, str], str] = {}
+
+    def record(line_number: int, kind: str, value: str) -> None:
+        findings.setdefault((line_number, kind), _redacted_preview(value))
+
     for line_number, line in enumerate(text.splitlines(), start=1):
-        if PRIVATE_KEY_RE.search(line):
-            seen.add((line_number, "private-key"))
+        private_key = PRIVATE_KEY_RE.search(line)
+        if private_key is not None:
+            record(line_number, "private-key", private_key.group(0))
         for kind, pattern in PROVIDER_PATTERNS:
-            if pattern.search(line):
-                seen.add((line_number, kind))
+            provider_match = pattern.search(line)
+            if provider_match is not None:
+                value = provider_match.group(0)
+                if not _provider_value_is_placeholder(value):
+                    record(line_number, kind, value)
         bearer = BEARER_RE.search(line)
-        if bearer is not None and not _looks_placeholder(bearer.group(1)):
-            seen.add((line_number, "bearer-token"))
+        if bearer is not None and not _provider_value_is_placeholder(bearer.group(1)):
+            record(line_number, "bearer-token", bearer.group(1))
         url_credentials = URL_CREDENTIAL_RE.search(line)
-        if url_credentials is not None and not _looks_placeholder(url_credentials.group(1)):
-            seen.add((line_number, "url-credential"))
+        if url_credentials is not None and not _provider_value_is_placeholder(url_credentials.group(1)):
+            record(line_number, "url-credential", url_credentials.group(1))
         for match in SENSITIVE_ASSIGNMENT_RE.finditer(line):
             key_match = re.search(
                 r"(?i)(api[_-]?key|secret(?:[_-]?key)?|token|password|passwd|private[_-]?key|access[_-]?key|client[_-]?secret|credentials?)",
                 match.group(0),
             )
             key = key_match.group(1) if key_match else "secret"
+            value = match.group("quoted") or match.group("bare") or ""
             if _assignment_is_secret(match, key):
-                seen.add((line_number, "sensitive-assignment"))
-    for line_number, kind in sorted(seen):
-        findings.append({"path": relative, "line": line_number, "kind": kind})
-    return findings
+                record(line_number, "sensitive-assignment", value)
+
+    return [
+        {"path": relative, "line": line_number, "kind": kind, "preview": preview}
+        for (line_number, kind), preview in sorted(findings.items())
+    ]
 
 
 def run(repo: Path) -> CheckResult:
@@ -135,6 +200,8 @@ def run(repo: Path) -> CheckResult:
     findings: list[dict[str, object]] = []
     unreadable: list[str] = []
     for path in sorted(files, key=lambda item: relative_path(repo, item)):
+        if should_skip_content_scan(repo, path):
+            continue
         data = read_bytes(path)
         relative = relative_path(repo, path)
         if data is None:

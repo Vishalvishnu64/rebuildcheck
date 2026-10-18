@@ -32,6 +32,47 @@ SKIP_DIRECTORIES = frozenset(
         ".mypy_cache",
     }
 )
+SCAN_SKIP_NAMES = frozenset(
+    {
+        *SKIP_DIRECTORIES,
+        "build",
+        "dist",
+        "out",
+        "target",
+        "package-lock.json",
+        "pubspec.lock",
+        "yarn.lock",
+        "poetry.lock",
+        "cargo.lock",
+        "go.sum",
+    }
+)
+SCAN_BINARY_EXTENSIONS = frozenset(
+    {
+        ".7z",
+        ".bin",
+        ".bmp",
+        ".class",
+        ".dll",
+        ".dylib",
+        ".exe",
+        ".gif",
+        ".gz",
+        ".ico",
+        ".jar",
+        ".jpeg",
+        ".jpg",
+        ".pdf",
+        ".png",
+        ".so",
+        ".tar",
+        ".tif",
+        ".tiff",
+        ".wasm",
+        ".webp",
+        ".zip",
+    }
+)
 README_NAMES = ("README.md", "README.rst", "README.txt", "README")
 
 
@@ -69,6 +110,33 @@ def relative_path(repo: os.PathLike[str] | str, path: os.PathLike[str] | str) ->
             return Path(path).name or "."
         except (TypeError, ValueError):
             return "."
+
+
+def should_skip_content_scan(
+    repo: os.PathLike[str] | str, path: os.PathLike[str] | str
+) -> bool:
+    """Return whether a path is outside authored text worth content-scanning.
+
+    Git can track generated output and binary artifacts, so the directory walk
+    filters alone are not sufficient for the content scanners.  Keep this
+    filter opt-in for those scanners rather than changing the behavior of
+    unrelated checks that use :func:`files_for_scan`.
+    """
+
+    try:
+        root = Path(repo).resolve()
+        candidate = Path(path).resolve()
+        relative = candidate.relative_to(root)
+    except (OSError, RuntimeError, TypeError, ValueError):
+        try:
+            relative = Path(os.path.relpath(os.fspath(path), os.fspath(repo)))
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return True
+
+    parts = tuple(part.casefold() for part in relative.parts)
+    if any(part in SCAN_SKIP_NAMES for part in parts):
+        return True
+    return relative.suffix.casefold() in SCAN_BINARY_EXTENSIONS
 
 
 def iter_files(repo: os.PathLike[str] | str) -> Iterator[Path]:
