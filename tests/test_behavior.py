@@ -107,7 +107,7 @@ class RepositoryBehaviorTests(unittest.TestCase):
         report = inspect_repository(Path(temporary.name) / "missing", no_run=True)
 
         self.assertFalse(report.passed)
-        self.assertEqual(len(report.checks), 9)
+        self.assertEqual(len(report.checks), 10)
         self.assertTrue(report.fixes)
 
     def test_secret_and_absolute_path_checks_fail_with_concrete_findings(self) -> None:

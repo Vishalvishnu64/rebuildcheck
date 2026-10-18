@@ -15,6 +15,7 @@ from rebuildcheck.checks import (
     dockerfile,
     environment_example,
     git_repository,
+    portability,
     readme_sections,
     runtime_version,
     test_command,
@@ -88,7 +89,7 @@ class CheckFixtureTests(unittest.TestCase):
     def test_empty_repository_is_safe_and_reports_missing_inputs(self) -> None:
         results = run_static_checks(self.root)
 
-        self.assertEqual(len(results), 9)
+        self.assertEqual(len(results), 10)
         self.assertFalse(next(item for item in results if item.name == "git_repository").passed)
         self.assertFalse(next(item for item in results if item.name == "dockerfile").passed)
 
@@ -320,6 +321,7 @@ class CheckFixtureTests(unittest.TestCase):
         self.assertFalse((ROOT / "examples" / "broken" / "bad-config.txt").exists())
         self.assertTrue(absolute_paths.run(ROOT).passed)
         self.assertTrue(committed_secrets.run(ROOT).passed)
+        self.assertTrue(portability.run(ROOT).passed)
 
     def test_dockerfile_has_pinned_real_tag_and_runtime_layout(self) -> None:
         dockerfile_text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -403,7 +405,7 @@ class CheckFixtureTests(unittest.TestCase):
         names = {item["check"] for item in document["fixes"]}
         self.assertNotEqual(completed.returncode, 0, completed.stderr)
         self.assertFalse(document["passed"])
-        self.assertEqual(document["score"], 66)
+        self.assertEqual(document["score"], 70)
         self.assertTrue({"dependency_lockfile", "absolute_paths", "committed_secrets"} <= names)
         self.assertEqual(
             document["fixes"],
