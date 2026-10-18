@@ -36,15 +36,43 @@ The command exits with status 0 only when every required check that ran passed.
 
 ## How it works
 
-1. The CLI runs nine defensive static checks against the requested repository.
-2. It detects the documented test command and clones the committed repository
+1. The CLI detects a supported project type from root-level marker files and
+   includes it in the human and JSON reports.
+2. It runs ten defensive static checks against the requested repository,
+   including Windows-to-Linux portability checks.
+3. It detects the documented test command and clones the committed repository
    into a temporary clean-room directory.
-3. It runs that command without a shell, captures bounded output, and reports
+4. It runs that command without a shell, captures bounded output, and reports
    failures and timeouts clearly.
-4. With `--docker`, it also runs `docker build` in the clean-room clone when
+5. With `--docker`, it also runs `docker build` in the clean-room clone when
    Docker is installed; unavailable Docker is reported as skipped.
-5. The score covers every evaluated static or execution check. The process
+6. The score covers every evaluated static or execution check. The process
    exits non-zero when a required check or execution check fails.
+
+## Supported ecosystems
+
+Project type is inferred from the files present at the repository root. The
+checks recognise these reproducibility markers and test commands:
+
+| Ecosystem | Dependency lockfiles | Pinned runtime | Test commands |
+| --- | --- | --- | --- |
+| Python | `requirements.lock`, `poetry.lock`, `uv.lock` | `.python-version` | `pytest`, `python -m pytest`, `unittest`, `python -m unittest` |
+| Node | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | `.nvmrc` | `npm test` |
+| Go | `go.sum` | `go.mod` `go` directive | `go test` |
+| Rust | `Cargo.lock` | `rust-toolchain.toml` | `cargo test` |
+
+The project type is reported as `unknown` when no supported marker is present
+or when markers from multiple ecosystems make a single classification
+ambiguous. Lockfiles are checked for presence and usable content; the tool
+does not resolve dependencies or install another ecosystem's toolchain.
+
+## Windows-to-Linux portability check
+
+The `portability` check looks for CRLF line endings in shell scripts,
+Makefiles, and Dockerfiles; shebang scripts that are not executable in the Git
+index; and README paths whose capitalisation differs from the repository path.
+Each finding includes a concrete fix in the structured report. NUL-containing
+binary files are ignored rather than treated as text.
 
 ## Known limitations and next ideas
 
@@ -57,6 +85,10 @@ clean-machine failure has been eliminated. It does not detect yet:
 - Every machine-specific path: the path check looks for obvious user-specific
   Unix, Windows, and WSL patterns, but it does not understand every host-only
   setting or generated binary.
+- Every portability issue: the portability check is intentionally conservative
+  and only recognises common script names, shebangs, and README path forms. It
+  does not model all filesystem semantics, generated files, or tools that
+  rewrite line endings outside Git.
 - Dependency graph problems: a recognised lockfile can still be stale,
   incomplete, missing hashes, or inconsistent with the dependency manifest.
   The checker does not resolve or install dependencies for the target project.
@@ -136,7 +168,7 @@ so the project itself contains no complete secret or machine-specific path:
   repo, exits 0, and reports **100/100**; all static checks pass and the
   clean-room `make test` passes.
 - `python examples/materialize.py broken --no-run` exits non-zero, reports
-  **66/100**, and lists the missing lockfile, absolute-path, and fake-secret
+  **70/100**, and lists the missing lockfile, absolute-path, and fake-secret
   fixes in priority order. Append `--json` to validate machine-readable output.
 
 `materialize.py` copies a source snapshot to a temporary directory, injects
@@ -150,6 +182,7 @@ Representative output from the clean self-check:
 
 ```text
 rebuildcheck report: .
+Project type: Python
 Score: 100/100
 
 Static checks:
@@ -159,6 +192,7 @@ Static checks:
   PASS Dockerfile — The root Dockerfile contains a FROM instruction for a container base image.
   PASS Test Command — The README documents a recognizable command for running tests.
   PASS Readme Sections — The README contains setup, run, and test documentation headings.
+  PASS Portability — No Windows-to-Linux portability hazards were found.
   PASS Environment Example — .env.example exists and all dotenv-like files contain safe placeholder or non-secret values.
   PASS Absolute Paths — No obvious user-specific absolute paths were found in scanned files.
   PASS Committed Secrets — No obvious secrets were found in scanned files.
