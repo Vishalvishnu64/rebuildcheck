@@ -36,6 +36,10 @@ class EvidenceAndFalsePositiveTests(unittest.TestCase):
         return "xoxb-" + "b" * 20
 
     @staticmethod
+    def stripe_value() -> str:
+        return "sk_live_" + "s" * 16
+
+    @staticmethod
     def home_path() -> str:
         return "/" + "home/" + "judge/" + "repo"
 
@@ -64,16 +68,12 @@ class EvidenceAndFalsePositiveTests(unittest.TestCase):
         result = absolute_paths.run(self.root)
 
         self.assertFalse(result.passed)
-        self.assertEqual(
-            result.details["findings"],
-            [
-                {
-                    "path": "src/settings.txt",
-                    "line": 2,
-                    "kind": "unix-user-path",
-                }
-            ],
-        )
+        finding = result.details["findings"][0]
+        self.assertEqual(finding["path"], "src/settings.txt")
+        self.assertEqual(finding["line"], 2)
+        self.assertEqual(finding["lines"], [2])
+        self.assertEqual(finding["more"], 0)
+        self.assertEqual(finding["kinds"], ["unix-user-path"])
 
     def test_lockfiles_build_outputs_and_binary_extensions_are_skipped(self) -> None:
         secret = self.aws_value()
@@ -140,15 +140,130 @@ class EvidenceAndFalsePositiveTests(unittest.TestCase):
             "AWS=" + self.aws_value() + "\n"
             + "GITHUB=" + self.github_value() + "\n"
             + "SLACK=" + self.slack_value() + "\n"
+            + "STRIPE=" + self.stripe_value() + "\n"
             + private_key_header
             + "\n",
         )
 
         result = committed_secrets.run(self.root)
-        kinds = {item["kind"] for item in result.details["findings"]}
+        kinds = {
+            kind
+            for item in result.details["findings"]
+            for kind in item["kinds"]
+        }
 
         self.assertFalse(result.passed)
-        self.assertTrue({"aws-access-key", "github-token", "slack-token", "private-key"} <= kinds)
+        self.assertTrue(
+            {
+                "aws-access-key",
+                "github-token",
+                "slack-token",
+                "stripe-key",
+                "private-key",
+            }
+            <= kinds
+        )
+
+    def test_evidence_groups_files_and_truncates_line_numbers(self) -> None:
+        machine_path = self.home_path()
+        self.write(
+            "paths.txt",
+            "\n".join("PATH=" + machine_path for _ in range(5)) + "\n",
+        )
+        self.write(
+            "tokens.txt",
+            "\n".join("AWS=" + self.aws_value() for _ in range(5)) + "\n",
+        )
+
+        path_result = absolute_paths.run(self.root)
+        path_findings = path_result.details["findings"]
+        self.assertEqual(len(path_findings), 1)
+        self.assertEqual(path_findings[0]["path"], "paths.txt")
+        self.assertEqual(path_findings[0]["lines"], [1, 2, 3])
+        self.assertEqual(path_findings[0]["more"], 2)
+
+        secret_result = committed_secrets.run(self.root)
+        secret_findings = secret_result.details["findings"]
+        self.assertEqual(len(secret_findings), 1)
+        self.assertEqual(secret_findings[0]["path"], "tokens.txt")
+        self.assertEqual(secret_findings[0]["lines"], [1, 2, 3])
+        self.assertEqual(secret_findings[0]["more"], 2)
+        self.assertEqual(secret_findings[0]["kinds"], ["aws-access-key"])
+
+    def test_sensitive_assignments_only_flag_substantial_literal_values(self) -> None:
+        self.write(
+            "assignments.py",
+            "\n".join(
+                (
+                    'TOKEN = config.token',
+                    'TOKEN = "req.headers.authorization"',
+                    'TOKEN = "jwt.decode(value)"',
+                    'TOKEN = "process.env.TOKEN"',
+                    'TOKEN = "os.environ[TOKEN]"',
+                    'TOKEN = "bytes(value)"',
+                    'TOKEN = "str(value)"',
+                    'TOKEN = "long.value"',
+                    'TOKEN = "long[value]"',
+                    'TOKEN = "long(value)"',
+                    'TOKEN = "abcdefgh".strip()',
+                    'TOKEN = "1234567"',
+                    'TOKEN = "write"',
+                    'TOKEN = "read"',
+                    'TOKEN = "true"',
+                    'TOKEN = "false"',
+                    'TOKEN = "null"',
+                    'TOKEN = "short"',
+                    'TOKEN = "a real secret value"',
+                )
+            )
+            + "\n",
+        )
+
+        result = committed_secrets.run(self.root)
+
+        self.assertFalse(result.passed)
+        findings = result.details["findings"]
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["kind"], "sensitive-assignment")
+        self.assertEqual(findings[0]["lines"], [19])
+
+    def test_named_directories_and_key_extensions_are_skipped(self) -> None:
+        private_key = "-----BEGIN RSA PRIVATE KEY-----\n"
+        machine_path = "PATH=" + self.home_path() + "\n"
+        for directory in (
+            "tests",
+            "TEST",
+            "test",
+            "__TESTS__",
+            "Docs",
+            "examples",
+            "FIXTURES",
+        ):
+            for extension in (".pem", ".key", ".crt"):
+                self.write(directory + "/ignored" + extension, private_key + machine_path)
+
+        self.assertTrue(committed_secrets.run(self.root).passed)
+        self.assertTrue(absolute_paths.run(self.root).passed)
+
+    def test_provider_tokens_and_private_keys_are_kept_outside_skips(self) -> None:
+        self.write(
+            "credentials.pem",
+            "AWS=" + self.aws_value() + "\n"
+            + "GITHUB=" + self.github_value() + "\n"
+            + "SLACK=" + self.slack_value() + "\n"
+            + "STRIPE=" + self.stripe_value() + "\n"
+            + "-----BEGIN PRIVATE KEY-----\n",
+        )
+
+        result = committed_secrets.run(self.root)
+        finding = result.details["findings"][0]
+
+        self.assertFalse(result.passed)
+        self.assertEqual(finding["path"], "credentials.pem")
+        self.assertEqual(
+            set(finding["kinds"]),
+            {"aws-access-key", "github-token", "slack-token", "stripe-key", "private-key"},
+        )
 
     def test_human_and_json_reports_include_bounded_evidence(self) -> None:
         secret = self.aws_value()

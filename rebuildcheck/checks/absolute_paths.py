@@ -19,6 +19,7 @@ from .common import (
 NAME = "absolute_paths"
 PRIORITY = 2
 NO_FIX = "No action needed."
+MAX_FINDINGS = 100
 
 # Build the roots in pieces so this checker does not report its own pattern
 # examples as a finding when it is itself committed and scanned.
@@ -65,6 +66,50 @@ def _finding_kind(line: str) -> str | None:
     return None
 
 
+def _group_findings(findings: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Group absolute-path evidence by file with bounded line numbers."""
+
+    grouped: dict[str, dict[str, object]] = {}
+    for finding in findings:
+        path = finding.get("path")
+        line = finding.get("line")
+        kind = finding.get("kind")
+        if not isinstance(path, str) or not isinstance(line, int):
+            continue
+        entry = grouped.setdefault(path, {"lines": [], "kinds": []})
+        lines = entry["lines"]
+        if isinstance(lines, list) and line not in lines:
+            lines.append(line)
+        kinds = entry["kinds"]
+        if isinstance(kinds, list) and isinstance(kind, str) and kind not in kinds:
+            kinds.append(kind)
+
+    result: list[dict[str, object]] = []
+    for path in sorted(grouped):
+        entry = grouped[path]
+        lines = sorted(
+            line for line in entry.get("lines", []) if isinstance(line, int)
+        )
+        kinds = sorted(
+            kind for kind in entry.get("kinds", []) if isinstance(kind, str)
+        )
+        if not lines or not kinds:
+            continue
+        result.append(
+            {
+                "path": path,
+                # Keep the first line for existing human evidence rendering;
+                # ``lines`` and ``more`` carry the complete bounded evidence.
+                "line": lines[0],
+                "lines": lines[:3],
+                "more": max(0, len(lines) - 3),
+                "kind": kinds[0] if len(kinds) == 1 else "multiple",
+                "kinds": kinds,
+            }
+        )
+    return result
+
+
 def run(repo: Path) -> CheckResult:
     """Return whether scanned files avoid obvious user-specific paths."""
 
@@ -96,10 +141,10 @@ def run(repo: Path) -> CheckResult:
             kind = _finding_kind(line)
             if kind is not None:
                 findings.append({"path": relative, "line": line_number, "kind": kind})
-                if len(findings) >= 100:
-                    break
-        if len(findings) >= 100:
+        if len({finding.get("path") for finding in findings}) >= MAX_FINDINGS:
             break
+
+    findings = _group_findings(findings)[:MAX_FINDINGS]
 
     if findings:
         return CheckResult(
