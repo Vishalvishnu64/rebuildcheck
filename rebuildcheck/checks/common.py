@@ -63,6 +63,16 @@ SCAN_SKIP_NAMES = frozenset(
         "bun.lockb",
     }
 )
+CONTENT_SKIP_DIRECTORIES = frozenset(
+    {
+        "tests",
+        "test",
+        "__tests__",
+        "docs",
+        "examples",
+        "fixtures",
+    }
+)
 SCAN_BINARY_EXTENSIONS = frozenset(
     {
         ".7z",
@@ -150,6 +160,8 @@ def should_skip_content_scan(
             return True
 
     parts = tuple(part.casefold() for part in relative.parts)
+    if any(part in CONTENT_SKIP_DIRECTORIES for part in parts[:-1]):
+        return True
     if any(part in SCAN_SKIP_NAMES for part in parts):
         return True
     return relative.suffix.casefold() in SCAN_BINARY_EXTENSIONS
@@ -324,9 +336,24 @@ def run_git(
     unusual filenames cannot cause an exception.
     """
 
+    returncode, stdout, stderr = run_git_bytes(repo, *arguments, timeout=timeout)
+
+    def decode(value: bytes) -> str:
+        return value.decode("utf-8", errors="replace")
+
+    return returncode, decode(stdout), decode(stderr)
+
+
+def run_git_bytes(
+    repo: os.PathLike[str] | str,
+    *arguments: str,
+    timeout: int = GIT_TIMEOUT_SECONDS,
+) -> tuple[int | None, bytes, bytes]:
+    """Run Git while preserving raw output for index/blob inspection."""
+
     root = as_repo_path(repo)
     if root is None:
-        return None, "", "repository is not a directory"
+        return None, b"", b"repository is not a directory"
     try:
         completed = subprocess.run(
             ["git", *arguments],
@@ -337,12 +364,9 @@ def run_git(
             timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError, ValueError):
-        return None, "", "git could not be executed"
+        return None, b"", b"git could not be executed"
 
-    def decode(value: bytes) -> str:
-        return value.decode("utf-8", errors="replace")
-
-    return completed.returncode, decode(completed.stdout), decode(completed.stderr)
+    return completed.returncode, completed.stdout, completed.stderr
 
 
 def git_output(

@@ -15,6 +15,7 @@ from .common import (
     read_bytes,
     relative_path,
     run_git,
+    run_git_bytes,
 )
 
 NAME = "portability"
@@ -116,6 +117,69 @@ def _finding(
     return {"path": path, "line": line, "kind": kind, "fix": fix, **extra}
 
 
+def _group_findings(findings: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Group all portability evidence into one finding per file."""
+
+    grouped: dict[str, dict[str, object]] = {}
+    for finding in findings:
+        path = finding.get("path")
+        line = finding.get("line")
+        kind = finding.get("kind")
+        if not isinstance(path, str) or not isinstance(line, int):
+            continue
+        entry = grouped.setdefault(path, {"lines": [], "kinds": [], "fixes": []})
+        lines = entry["lines"]
+        affected_lines = finding.get("affected_lines")
+        if isinstance(lines, list):
+            candidates = (
+                affected_lines
+                if isinstance(affected_lines, list)
+                else [line]
+            )
+            for candidate in candidates:
+                if isinstance(candidate, int) and candidate not in lines:
+                    lines.append(candidate)
+        kinds = entry["kinds"]
+        if isinstance(kinds, list) and isinstance(kind, str) and kind not in kinds:
+            kinds.append(kind)
+        fixes = entry["fixes"]
+        fix = finding.get("fix")
+        if isinstance(fixes, list) and isinstance(fix, str) and fix not in fixes:
+            fixes.append(fix)
+        for key in ("mentioned", "actual"):
+            value = finding.get(key)
+            if value is not None:
+                entry.setdefault(key, value)
+
+    result: list[dict[str, object]] = []
+    for path in sorted(grouped):
+        entry = grouped[path]
+        lines = sorted(
+            line for line in entry.get("lines", []) if isinstance(line, int)
+        )
+        kinds = sorted(
+            kind for kind in entry.get("kinds", []) if isinstance(kind, str)
+        )
+        fixes = [fix for fix in entry.get("fixes", []) if isinstance(fix, str)]
+        if not lines or not kinds or not fixes:
+            continue
+        finding: dict[str, object] = {
+            "path": path,
+            "line": lines[0],
+            "line_count": len(lines),
+            # Keep the first concrete kind for callers that historically
+            # filtered on ``kind``; ``kinds`` records every issue in the file.
+            "kind": kinds[0],
+            "kinds": kinds,
+            "fix": " ".join(fixes),
+        }
+        for key in ("mentioned", "actual"):
+            if key in entry:
+                finding[key] = entry[key]
+        result.append(finding)
+    return result
+
+
 def _index_modes(repo: Path) -> dict[str, set[str]] | None:
     """Return Git index modes keyed by repository-relative POSIX path."""
 
@@ -140,6 +204,43 @@ def _index_modes(repo: Path) -> dict[str, set[str]] | None:
             continue
         modes.setdefault(normalized, set()).add(fields[0])
     return modes
+
+
+def _index_eol(repo: Path) -> dict[str, str] | None:
+    """Return Git index EOL states keyed by repository-relative path."""
+
+    returncode, output, _error = run_git(repo, "ls-files", "--eol", "-z", "--")
+    if returncode != 0:
+        return None
+
+    eol_states: dict[str, str] = {}
+    for record in output.split("\x00"):
+        metadata, separator, raw_path = record.partition("\t")
+        if not separator or not raw_path:
+            continue
+        fields = metadata.split()
+        if not fields:
+            continue
+        try:
+            relative = PurePosixPath(raw_path)
+            if relative.is_absolute() or ".." in relative.parts:
+                continue
+            normalized = relative.as_posix()
+        except (TypeError, ValueError):
+            continue
+        eol_states[normalized] = fields[0]
+    return eol_states
+
+
+def _index_data(repo: Path, relative: str) -> bytes | None:
+    """Return a tracked file's index contents when Git can provide them."""
+
+    returncode, output, _error = run_git_bytes(
+        repo, "cat-file", "blob", f":{relative}"
+    )
+    if returncode != 0:
+        return None
+    return output
 
 
 def _mode_for_path(path: Path, repo: Path, modes: dict[str, set[str]]) -> set[str]:
@@ -257,6 +358,7 @@ def run(repo: Path) -> CheckResult:
         )
 
     tracked, files = files_for_scan(root)
+    eol_states = _index_eol(root) if tracked else None
     findings: list[dict[str, object]] = []
     unreadable: list[str] = []
 
@@ -266,23 +368,34 @@ def run(repo: Path) -> CheckResult:
         if data is None:
             unreadable.append(relative)
             continue
+        if tracked:
+            if eol_states is None or eol_states.get(relative) != "i/crlf":
+                continue
+            indexed_data = _index_data(root, relative)
+            if indexed_data is None:
+                continue
+            scan_data = indexed_data
+        else:
+            scan_data = data
         # The NUL guard comes before filename classification so an image named
         # Dockerfile or ``.sh`` is never reported as a text file.
-        if b"\x00" in data:
+        if b"\x00" in scan_data:
             continue
-        if not _is_portability_file(path, data):
+        if not _is_portability_file(path, scan_data):
             continue
-        for line in _line_numbers_with_crlf(data):
+
+        crlf_lines = _line_numbers_with_crlf(scan_data)
+        if crlf_lines:
             findings.append(
                 _finding(
                     path=relative,
-                    line=line,
+                    line=crlf_lines[0],
                     kind="crlf-line-ending",
                     fix=_shell_fix(relative),
+                    line_count=len(crlf_lines),
+                    affected_lines=crlf_lines,
                 )
             )
-            if len(findings) >= MAX_FINDINGS:
-                break
         if len(findings) >= MAX_FINDINGS:
             break
 
@@ -314,6 +427,8 @@ def run(repo: Path) -> CheckResult:
     if readme is not None and len(findings) < MAX_FINDINGS:
         readme_findings, binary_readme = _readme_case_findings(root, readme)
         findings.extend(readme_findings[: MAX_FINDINGS - len(findings)])
+
+    findings = _group_findings(findings)[:MAX_FINDINGS]
 
     if findings:
         return CheckResult(

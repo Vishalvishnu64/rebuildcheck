@@ -226,9 +226,23 @@ def _render_finding_evidence(check: CheckResult) -> list[str]:
         kind = finding.get("kind")
         if not isinstance(path, str) or not isinstance(line, int):
             continue
-        detail = f"    Evidence: {path}:{line}"
+        evidence_lines = finding.get("lines")
+        if isinstance(evidence_lines, list):
+            valid_lines = [
+                value for value in evidence_lines if isinstance(value, int)
+            ]
+        else:
+            valid_lines = []
+        line_text = ",".join(str(value) for value in valid_lines) or str(line)
+        detail = f"    Evidence: {path}:{line_text}"
         if isinstance(kind, str) and kind:
             detail += f" ({kind})"
+        line_count = finding.get("line_count")
+        if isinstance(line_count, int) and line_count > 1:
+            detail += f" — {line_count} affected lines"
+        more = finding.get("more")
+        if isinstance(more, int) and more > 0:
+            detail += f" (+{more} more)"
         preview = finding.get("preview")
         if isinstance(preview, str) and preview:
             # Secret scanners provide only a bounded preview. Do not render any
