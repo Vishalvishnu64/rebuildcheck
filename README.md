@@ -55,9 +55,22 @@ The command exits with status 0 only when every required check that ran passed.
 The `portability` check looks for CRLF line endings in shell scripts,
 Makefiles, and Dockerfiles; shebang scripts that are not executable in the Git
 index; and README paths whose capitalisation differs from the repository path.
-Each finding includes its relative file path, line number, and a concrete fix in
-the human-readable and structured reports. Secret evidence is bounded to at
-most four leading characters followed by `****`; complete credential values
+It reports one finding per file, including the affected-line count and one
+concrete fix line. For a Git repository, CRLF is judged from the committed
+index state reported by `git ls-files --eol`: only `i/crlf` files are flagged.
+This means a Windows checkout that has `i/lf` and `w/crlf` is not reported as a
+repository portability problem. A non-Git folder uses its working-file bytes
+because it has no index state to inspect.
+
+The secret and absolute-path checks use the same one-finding-per-file evidence
+shape. They list at most three line numbers and include a numeric count for any
+additional matching lines; human-readable reports render that count as
+`+N more`. Secret assignment evidence is limited to quoted literals of at least
+eight characters that do not look like source code. The scanner skips files
+under `tests`, `test`, `__tests__`, `docs`, `examples`, and `fixtures` (case
+insensitively), while still checking real-looking AWS, GitHub, Slack, and
+Stripe tokens and private-key blocks elsewhere. Secret previews are bounded to
+at most four leading characters followed by `****`; complete credential values
 are never printed. NUL-containing binary files are ignored rather than treated
 as text.
 
