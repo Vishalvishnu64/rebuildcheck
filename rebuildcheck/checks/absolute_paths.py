@@ -20,15 +20,6 @@ UNIX_USER_ROOTS = (
     "home",
     "Users",
     "root",
-    "tmp",
-    "var",
-    "opt",
-    "workspace",
-    "srv",
-    "etc",
-    "usr",
-    "bin",
-    "sbin",
 )
 UNIX_USER_PATH_RE = re.compile(
     r"(?<![\w/])/(?:" + "|".join(UNIX_USER_ROOTS) + r")[/\\][^\s\"'`<>]+",

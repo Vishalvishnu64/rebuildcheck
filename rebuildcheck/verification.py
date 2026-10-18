@@ -250,6 +250,32 @@ def verify_clean_room(
             duration_seconds=git_check.duration_seconds,
         )
     git_root = pathlib.Path(git_root_text[0]).expanduser()
+    try:
+        if git_root.resolve() != repo_path:
+            message = (
+                "Repository path is inside another Git worktree; pass the repository root "
+                "to verify a self-contained clean-room clone."
+            )
+            return _failure_report(
+                repository=repository_display,
+                command=requested_command,
+                message=message,
+                clone_error=message,
+                output=git_check.output,
+                run_docker=run_docker,
+                duration_seconds=git_check.duration_seconds,
+            )
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        message = f"Unable to validate the Git repository root: {_exception_text(exc)}"
+        return _failure_report(
+            repository=repository_display,
+            command=requested_command,
+            message=message,
+            clone_error=message,
+            output=git_check.output,
+            run_docker=run_docker,
+            duration_seconds=git_check.duration_seconds,
+        )
 
     try:
         with tempfile.TemporaryDirectory(prefix="rebuildcheck-") as temporary_dir:

@@ -96,7 +96,9 @@ def _is_placeholder(value: str) -> bool:
         return True
     if lowered.startswith(("your-", "your_", "replace-", "replace_", "change-", "change_")):
         return True
-    if "placeholder" in lowered or "example" in lowered:
+    if lowered.startswith(
+        ("placeholder-", "placeholder_", "example-", "example_")
+    ):
         return True
     return False
 

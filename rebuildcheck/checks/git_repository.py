@@ -34,12 +34,29 @@ def run(repo: Path) -> CheckResult:
         )
 
     worktree = git_output(root, "rev-parse", "--is-inside-work-tree")
+    repository_root = git_output(root, "rev-parse", "--show-toplevel")
+    try:
+        is_repository_root = (
+            repository_root is not None
+            and Path(repository_root.strip()).resolve() == root.resolve()
+        )
+    except (OSError, RuntimeError, TypeError, ValueError):
+        is_repository_root = False
     if worktree is None or worktree.strip().casefold() != "true":
         return CheckResult(
             passed=False,
             name=NAME,
             reason="The inspected directory is not a Git worktree.",
             fix="Run `git init` in the repository, add the intended files, and create an initial commit.",
+            priority=PRIORITY,
+            details={"repository": "."},
+        )
+    if not is_repository_root:
+        return CheckResult(
+            passed=False,
+            name=NAME,
+            reason="The inspected directory is inside another Git worktree, not the repository root.",
+            fix="Pass the root directory of the repository that owns the files, rather than one of its subdirectories.",
             priority=PRIORITY,
             details={"repository": "."},
         )
