@@ -49,23 +49,6 @@ The command exits with status 0 only when every required check that ran passed.
 6. The score covers every evaluated static or execution check. The process
    exits non-zero when a required check or execution check fails.
 
-## Supported ecosystems
-
-Project type is inferred from the files present at the repository root. The
-checks recognise these reproducibility markers and test commands:
-
-| Ecosystem | Dependency lockfiles | Pinned runtime | Test commands |
-| --- | --- | --- | --- |
-| Python | `requirements.lock`, `poetry.lock`, `uv.lock` | `.python-version` | `pytest`, `python -m pytest`, `unittest`, `python -m unittest` |
-| Node | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | `.nvmrc` | `npm test` |
-| Go | `go.sum` | `go.mod` `go` directive | `go test` |
-| Rust | `Cargo.lock` | `rust-toolchain.toml` | `cargo test` |
-
-The project type is reported as `unknown` when no supported marker is present
-or when markers from multiple ecosystems make a single classification
-ambiguous. Lockfiles are checked for presence and usable content; the tool
-does not resolve dependencies or install another ecosystem's toolchain.
-
 ## Windows-to-Linux portability check
 
 The `portability` check looks for CRLF line endings in shell scripts,
@@ -121,6 +104,23 @@ The same command works without downloading dependencies:
 ```text
 python -m unittest discover -s tests -v
 ```
+
+## Supported ecosystems
+
+Project type is inferred from the files present at the repository root. The
+checks recognise these reproducibility markers and test commands:
+
+| Ecosystem | Dependency lockfiles | Pinned runtime | Test commands |
+| --- | --- | --- | --- |
+| Python | `requirements.lock`, `poetry.lock`, `uv.lock` | `.python-version` | Pytest or Python's unittest module |
+| Node | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml` | `.nvmrc` | `npm test` |
+| Go | `go.sum` | `go.mod` `go` directive | `go test` |
+| Rust | `Cargo.lock` | `rust-toolchain.toml` | `cargo test` |
+
+The project type is reported as `unknown` when no supported marker is present
+or when markers from multiple ecosystems make a single classification
+ambiguous. Lockfiles are checked for presence and usable content; the tool
+does not resolve dependencies or install another ecosystem's toolchain.
 
 ## Deploy
 
