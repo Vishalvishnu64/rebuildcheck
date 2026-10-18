@@ -46,6 +46,36 @@ The command exits with status 0 only when every required check that ran passed.
 5. The score covers every evaluated static or execution check. The process
    exits non-zero when a required check or execution check fails.
 
+## Known limitations and next ideas
+
+`rebuildcheck` is a focused reproducibility smoke test, not a proof that every
+clean-machine failure has been eliminated. It does not detect yet:
+
+- Secret detection is incomplete: the scanner targets common token formats and
+  literal assignments, so custom, short, encoded, or obfuscated credentials
+  can be missed.
+- Every machine-specific path: the path check looks for obvious user-specific
+  Unix, Windows, and WSL patterns, but it does not understand every host-only
+  setting or generated binary.
+- Dependency graph problems: a recognised lockfile can still be stale,
+  incomplete, missing hashes, or inconsistent with the dependency manifest.
+  The checker does not resolve or install dependencies for the target project.
+- Full runtime or container correctness: runtime files are checked for a
+  conventional version pin and a Dockerfile is checked for a base image. A
+  Docker build is optional, and neither check proves that all platforms,
+  system packages, registries, or runtime services will be available.
+- External test prerequisites: the clean-room run clones committed files and
+  executes a small set of supported commands, but it does not provision
+  databases, credentials, services, or arbitrary network access. Unsupported
+  command forms are not executed through a shell.
+- Delivery configuration: the tool does not currently validate CI workflow
+  semantics, branch protection, remote permissions, or whether a repository's
+  documented deployment process actually succeeds.
+
+Useful next ideas are deeper manifest/lockfile consistency checks, broader
+secret and host-path detectors, and optional service-aware or multi-platform
+verification.
+
 ## Test
 
 Run the offline test suite from the project root:
