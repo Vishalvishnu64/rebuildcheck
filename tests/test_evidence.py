@@ -83,7 +83,11 @@ class EvidenceAndFalsePositiveTests(unittest.TestCase):
 
         for name in (
             "package-lock.json",
+            "npm-shrinkwrap.json",
+            "requirements.lock",
+            "uv.lock",
             "pubspec.lock",
+            "pnpm-lock.yaml",
             "yarn.lock",
             "poetry.lock",
             "Cargo.lock",

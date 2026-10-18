@@ -30,6 +30,11 @@ SKIP_DIRECTORIES = frozenset(
         "__pycache__",
         ".pytest_cache",
         ".mypy_cache",
+        ".dart_tool",
+        ".gradle",
+        ".next",
+        ".nuxt",
+        "coverage",
     }
 )
 SCAN_SKIP_NAMES = frozenset(
@@ -40,11 +45,22 @@ SCAN_SKIP_NAMES = frozenset(
         "out",
         "target",
         "package-lock.json",
+        "npm-shrinkwrap.json",
+        "pdm.lock",
+        "pipfile.lock",
+        "requirements-dev.lock",
+        "requirements-prod.lock",
+        "requirements.lock",
         "pubspec.lock",
+        "pnpm-lock.yaml",
+        "pnpm-lock.yml",
         "yarn.lock",
         "poetry.lock",
+        "uv.lock",
         "cargo.lock",
         "go.sum",
+        "bun.lock",
+        "bun.lockb",
     }
 )
 SCAN_BINARY_EXTENSIONS = frozenset(
